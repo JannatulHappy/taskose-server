@@ -1,32 +1,16 @@
 const express = require("express");
-const app = express();
-require("dotenv").config();
 const cors = require("cors");
-const cookieParser = require("cookie-parser");
+require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
-const morgan = require("morgan");
-const port = process.env.PORT || 8000;
+const app = express();
 
-
-
-// middleware
-const corsOptions = {
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "https://pollinate-01.web.app",
-  ],
-  credentials: true,
-  optionSuccessStatus: 200,
-};
-
-app.use(cors(corsOptions));
+app.use(cors());
 app.use(express.json());
-app.use(cookieParser());
-app.use(morgan("dev"));
 
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.wlf4d.mongodb.net/?retryWrites=true&w=majority`;
+const uri = process.env.MONGODB_URI;
+
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -34,14 +18,120 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
 async function run() {
   try {
-   
+    // Connect the client to the server	(optional starting in v4.7)
+    client.connect();
+
+    const userCollection = client.db("TaskoseDB").collection("users");
+    const taskCollection = client.db("TaskoseDB").collection("allTask");
+    // Get all User Data
+    app.get("/users", async (req, res) => {
+      const result = await userCollection.find().toArray();
+      res.send(result);
+    });
+    // Post All User Data
+    app.post("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      console.log(email);
+      const userData = req.body;
+      const result = await userCollection.insertOne(userData);
+      res.send(result);
+    });
+
+    // Get All Task Data
+    app.get("/allTask", async (req, res) => {
+      const email = req.query?.email;
+      const result = await taskCollection.find({ email: email }).toArray();
+      res.send(result);
+    });
+
+    // Save Task To Database
+    app.post("/create-task", async (req, res) => {
+      const taskData = req.body;
+      const saveTask = {
+        ...taskData,
+        status: "Todo",
+        taskCreatedAt: new Date().toLocaleString("en-US", {
+          timeZone: "Asia/Dhaka",
+        }),
+      };
+      try {
+        const result = await taskCollection.insertOne(saveTask);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
+
+    app.put("/tasks/update/:id", async (req, res) => {
+      const id = req.params.id;
+      const { updateData } = req.body;
+      try {
+        const query = { _id: new ObjectId(id) };
+        const options = { upsert: true };
+        const updateTask = {
+          $set: {
+            taskTitle: updateData?.taskTitle,
+            priority: updateData?.priority,
+            deadline: updateData?.deadline,
+            taskDescription: updateData?.taskDescription,
+          },
+        };
+        const result = await taskCollection.updateOne(
+          query,
+          updateTask,
+          options
+        );
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ error: "Internal server error." });
+      }
+    });
+
+    app.patch("/tasks/status/:taskId", async (req, res) => {
+      const { taskId } = req.params;
+      const { status } = req.body;
+
+      try {
+        const existingTask = await taskCollection.findOne({
+          _id: new ObjectId(taskId),
+        });
+
+        if (!existingTask) {
+          return res.status(404).send({ error: "Task not found" });
+        }
+
+        // Check if the status is the same
+        if (existingTask.status === status) {
+          return res.send({
+            message: "Task status is already set to the requested status.",
+          });
+        }
+
+        const result = await taskCollection.updateOne(
+          { _id: new ObjectId(taskId) },
+          { $set: { status } }
+        );
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: error.message });
+      }
+    });
+
+    app.delete("/allTasks/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await taskCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result);
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
-      "Pinged your deployment.Taskose successfully connected to MongoDB!"
+      "Pinged your deployment. You successfully connected to MongoDB!"
     );
   } finally {
     // Ensures that the client will close when you finish/error
@@ -51,9 +141,11 @@ async function run() {
 run().catch(console.dir);
 
 app.get("/", (req, res) => {
-  res.send("Hello from Taskose Server..");
+  res.send("Taskose Server is Running");
 });
 
+// Start the server
+const port = process.env.PORT || 5000;
 app.listen(port, () => {
   console.log(`Taskose Server is running on port ${port}`);
 });
